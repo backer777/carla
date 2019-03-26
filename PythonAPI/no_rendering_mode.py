@@ -553,6 +553,38 @@ class MapImage(object):
         for stop in stops_transform:
             draw_stop(map_surface, font_surface, stop)
 
+
+        ### Draw connections ###################################################
+        to_pixel = lambda wp: world_to_pixel(wp.transform.location)
+        dist = 1.0
+        for wp in carla_map.generate_waypoints(dist):
+            pygame.draw.circle(map_surface, (255,0,0), to_pixel(wp), 3)
+            for nxt in wp.next(dist):
+                pygame.draw.line(map_surface, (0,255,0), to_pixel(wp), to_pixel(nxt), 2)
+            # if not wp.is_intersection:
+            if wp.lane_change & carla.LaneChange.Right:
+                r = wp.get_right_lane()
+                if r and r.lane_type == 'driving':
+                    pygame.draw.line(map_surface, (0,255,0), to_pixel(wp), to_pixel(r), 2)
+            if wp.lane_change & carla.LaneChange.Left:
+                l = wp.get_left_lane()
+                if l and l.lane_type == 'driving':
+                    pygame.draw.line(map_surface, (0,255,0), to_pixel(wp), to_pixel(l), 2)
+        ### Draw random locations ##############################################
+        # def random_location():
+        #     return carla.Location(
+        #         x=random.uniform(-500.0, 500.0),
+        #         y=random.uniform(-500.0, 500.0),
+        #         z=random.uniform(-500.0, 500.0))
+        # for _ in range(0, 5000):
+        #     location = random_location()
+        #     location_on_road = carla_map.get_waypoint(location).transform.location
+        #     pixel_loc = world_to_pixel(location)
+        #     pixel_lor = world_to_pixel(location_on_road)
+        #     pygame.draw.line(map_surface, (255,0,0), pixel_loc, pixel_lor, 2)
+        #     pygame.draw.circle(map_surface, (0,255,0), pixel_lor, 5)
+        ########################################################################
+
     def world_to_pixel(self, location, offset=(0, 0)):
         x = self.scale * self._pixels_per_meter * (location.x - self._world_offset[0])
         y = self.scale * self._pixels_per_meter * (location.y - self._world_offset[1])
@@ -570,11 +602,12 @@ class MapImage(object):
 
 class ModuleWorld(object):
 
-    def __init__(self, name, host, port, timeout, actor_filter, no_rendering=True):
+    def __init__(self, name, host, port, map_name, timeout, actor_filter, no_rendering=True):
         self.client = None
         self.name = name
         self.host = host
         self.port = port
+        self.map_name = map_name
         self.timeout = timeout
         self.actor_filter = actor_filter
         self.no_rendering = no_rendering
@@ -613,12 +646,12 @@ class ModuleWorld(object):
         self.hero_surface = None
         self.actors_surface = None
 
-    def _get_data_from_carla(self, host, port, timeout):
+    def _get_data_from_carla(self, host, port, map_name, timeout):
         try:
             self.client = carla.Client(host, port)
             self.client.set_timeout(timeout)
 
-            world = self.client.get_world()
+            world = self.client.load_world(map_name)
             town_map = world.get_map()
             return (world, town_map)
 
@@ -627,7 +660,7 @@ class ModuleWorld(object):
             exit_game()
 
     def start(self):
-        self.world, self.town_map = self._get_data_from_carla(self.host, self.port, self.timeout)
+        self.world, self.town_map = self._get_data_from_carla(self.host, self.port, self.map_name, self.timeout)
 
         settings = self.world.get_settings()
         settings.no_rendering_mode = self.no_rendering
@@ -1168,7 +1201,7 @@ def game_loop(args):
     # Init modules
     input_module = ModuleInput(MODULE_INPUT)
     hud_module = ModuleHUD(MODULE_HUD, args.width, args.height)
-    world_module = ModuleWorld(MODULE_WORLD, args.host, args.port, 2.0, args.filter, args.no_rendering)
+    world_module = ModuleWorld(MODULE_WORLD, args.host, args.port, args.map, 2.0, args.filter, args.no_rendering)
 
     # Register Modules
     module_manager.register_module(world_module)
@@ -1210,8 +1243,7 @@ def main():
         '--host',
         metavar='H',
         default='127.0.0.1',
-        help='IP of the host server (default: 127.0.0.1)'
-    )
+        help='IP of the host server (default: 127.0.0.1)')
     argparser.add_argument(
         '-p', '--port',
         metavar='P',
@@ -1228,6 +1260,10 @@ def main():
         metavar='PATTERN',
         default='vehicle.*',
         help='actor filter (default: "vehicle.*")')
+    argparser.add_argument(
+        '--map',
+        metavar='TOWN',
+        default='Town03')
     argparser.add_argument(
         '--no-rendering',
         type=bool,
